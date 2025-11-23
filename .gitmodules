@@ -1,0 +1,9 @@
+[submodule "libco"]
+	path = deps/libco
+	url = git@github.com:higan-emu/libco.git
+[submodule "deps/arena"]
+	path = deps/arena
+	url = https://github.com/tsoding/arena.git
+[submodule "deps/cops"]
+	path = deps/cops
+	url = git@github.com:SMicucci/cops.git
