@@ -1,6 +1,10 @@
 #include "runner.h"
 #include "libco.h"
 #include "roadrunner.h"
+#include <assert.h>
+#include <stdint.h>
+
+void runner_debug(void);
 
 #define ARENA_IMPLEMENTATION
 #define ARENA_REGION_COUNT (128)
@@ -11,6 +15,7 @@ static Arena road_arena = {0};
 static uint64_t arena_size = 0;
 static road_vec *free_road;
 static road_id next_id = 0;
+static inline road_t *road_from_id(road_id id);
 
 #define STACK_SIZE (1 << 16)
 static __thread runner_t runner;
@@ -102,12 +107,14 @@ static void runner_handle_wait(void)
         uint64_t i = 0;
         while (i < runner.wait->nelem) {
                 road_t *trg = runner.wait->data[i];
+                assert(trg->state == ROAD_WAIT && "wtf?");
                 switch (trg->wait.tag) {
                         case WAIT_NONE:
                                 continue;
                         case WAIT_CO:
                                 runner_waiting_co(trg, i);
                 }
+                i++;
         }
 }
 
@@ -116,38 +123,39 @@ static void runner_waiting_co(road_t *waiting, uint64_t wait_pos)
         if (!waiting || waiting->state != ROAD_WAIT ||
             waiting->wait.tag != WAIT_CO)
                 return;
+        road_t *trg = road_from_id(waiting->wait.val.id);
+        if (!trg) {
+                waiting->wait.val.res = ROAD_ERROR;
+                waiting->state = ROAD_READY;
+                road_vec_del(runner.wait, wait_pos, NULL);
+                road_list_push_back(runner.ready, waiting);
+        } else if (trg->state == ROAD_SUCCESS || trg->state == ROAD_FAIL) {
+                trg->waitcount--;
+                waiting->wait.val.res = trg->result;
+                waiting->state = ROAD_READY;
+                road_vec_del(runner.wait, wait_pos, NULL);
+                road_list_push_back(runner.ready, waiting);
+        }
+}
+
+static inline road_t *road_from_id(road_id id)
+{
         Region *r = road_arena.begin;
         uint64_t i = 0;
-        /* iterate truh arena via regions */
         while (i < arena_size && r) {
                 /* calculate entry and increment i */
                 int entry = i++ % ARENA_REGION_COUNT;
-                /* retrieve current target */
+                /* cast magic */
                 road_t *trg = &((road_t *)r->data)[entry];
                 /* match id */
-                if (trg->id == waiting->wait.val.id) {
-                        /* concretely ended */
-                        if (trg->state == ROAD_SUCCESS ||
-                            trg->state == ROAD_FAIL) {
-                                /* move to ready and reduce waitcounter */
-                                trg->waitcount--;
-                                waiting->wait.val.res = trg->result;
-                                waiting->state = ROAD_READY;
-                                road_vec_del(runner.wait, wait_pos, NULL);
-                                road_list_push_back(runner.ready, waiting);
-                        }
-                        /* if not matched end research and return */
-                        return;
+                if (trg->id == id) {
+                        return trg;
                 }
                 /* if end of arena go to next */
                 if (!(i % ARENA_REGION_COUNT))
                         r = r->next;
         }
-        /* return error on unexisting join */
-        waiting->wait.val.res = ROAD_ERROR;
-        waiting->state = ROAD_READY;
-        road_vec_del(runner.wait, wait_pos, NULL);
-        road_list_push_back(runner.ready, waiting);
+        return NULL;
 }
 
 road_t *road_request()
@@ -206,12 +214,18 @@ road_id road_create(road_fn fn, void *arg)
 
 void *road_join(road_id id)
 {
-        road_t *curr;
+        road_t *curr; /* running road */
         road_list_pop_front(runner.ready, &curr);
-        road_vec_push(runner.wait, curr);
+        road_t *trg = road_from_id(id); /* waited road */
+        if (!trg) {
+                road_list_push_front(runner.ready, curr);
+                return ROAD_ERROR;
+        }
+        trg->waitcount++; /* incremente waitcount */
         curr->state = ROAD_WAIT;
         curr->wait.tag = WAIT_CO;
         curr->wait.val.id = id;
+        road_vec_push(runner.wait, curr);
         co_switch(runner_co);
         return curr->wait.val.res;
 }
@@ -226,5 +240,44 @@ void road_yield(void)
         road_t *curr;
         road_list_pop_front(runner.ready, &curr);
         road_list_push_back(runner.ready, curr);
+        printf("> yield\n");
         co_switch(runner_co);
+}
+
+#include <stdio.h>
+#define D "\x1b[0m"
+#define Y "\x1b[33m"
+#define G "\x1b[32m"
+#define B "\x1b[34m"
+#define P "\x1b[35m"
+#define LF "\n"
+static inline const char *runner_debug_state(road_state_t a);
+void runner_debug(void)
+{
+        printf("~~~" G "DEBUG" D "~~~" LF);
+        printf(B "ready" D "(" P "%d" D "):" LF, runner.ready->nelem);
+        road_list_node *iter = runner.ready->head;
+        while (iter) {
+                printf("  > [" Y "%ld" D "]" G " %s" D LF, iter->val->id,
+                       runner_debug_state(iter->val->state));
+                iter = iter->next;
+        }
+        printf(B "wait" D "(" P "%d" D "):" LF, runner.wait->nelem);
+        for (uint64_t i = 0; i < runner.wait->nelem; i++) {
+                printf("  > [" Y "%ld" D "]" G " %s" D LF,
+                       runner.wait->data[i]->id,
+                       runner_debug_state(runner.wait->data[i]->state));
+        }
+        printf(B "end" D "(" P "%d" D "):" LF, runner.end->nelem);
+        for (uint64_t i = 0; i < runner.end->nelem; i++) {
+                printf("  > [" G "%ld" D "]" G " %s" D LF,
+                       runner.end->data[i]->id,
+                       runner_debug_state(runner.end->data[i]->state));
+        }
+}
+
+static char *state_tag[4] = {"READY", "WAIT", "SUCCESS", "FAIL"};
+static inline const char *runner_debug_state(road_state_t a)
+{
+        return state_tag[(int)a];
 }
