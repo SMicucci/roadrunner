@@ -4,7 +4,8 @@
 #include "cops.h"
 #include "libco.h"
 #include "roadrunner.h"
-#include <stdint.h>
+
+#include "util.h"
 
 typedef enum road_state_t {
         ROAD_READY,

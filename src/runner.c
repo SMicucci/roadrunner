@@ -18,9 +18,9 @@ static road_id next_id = 0;
 static inline road_t *road_from_id(road_id id);
 
 #define STACK_SIZE (1 << 16)
-static __thread runner_t runner;
-static __thread cothread_t runner_co;
-static __thread cothread_t main_co;
+static thread_local runner_t runner;
+static thread_local cothread_t runner_co;
+static thread_local cothread_t main_co;
 static void schedule(void);
 
 __attribute__((constructor)) static void init_runner()
@@ -185,8 +185,8 @@ void road_release(road_t *road)
  * ROAD IMPLEMENTATION
  * */
 
-static __thread road_t *volatile trampoline_road;
-static __thread cothread_t volatile trampoline_co;
+static thread_local road_t *volatile trampoline_road;
+static thread_local cothread_t volatile trampoline_co;
 static void trampoline(void)
 {
         road_t *road = trampoline_road;
