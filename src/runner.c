@@ -1,8 +1,10 @@
 #include "runner.h"
 #include "libco.h"
+#include "mutex.h"
 #include "roadrunner.h"
 #include <assert.h>
 #include <stdint.h>
+#include <time.h>
 
 void runner_debug(void);
 
@@ -18,8 +20,8 @@ static road_id next_id = 0;
 static inline road_t *road_from_id(road_id id);
 
 #define STACK_SIZE (1 << 16)
-static thread_local runner_t runner;
-static thread_local cothread_t runner_co;
+thread_local runner_t runner;
+thread_local cothread_t runner_co;
 static thread_local cothread_t main_co;
 static void schedule(void);
 
@@ -101,18 +103,23 @@ static void runner_handle_end(void)
 }
 
 static void runner_waiting_co(road_t *waiting, uint64_t wait_pos);
+static void runner_waiting_mux(road_t *waiting, uint64_t wait_pos);
 
 static void runner_handle_wait(void)
 {
         uint64_t i = 0;
         while (i < runner.wait->nelem) {
                 road_t *trg = runner.wait->data[i];
-                assert(trg->state == ROAD_WAIT && "wtf?");
+                assert(trg && trg->state == ROAD_WAIT && "wtf?");
                 switch (trg->wait.tag) {
                         case WAIT_NONE:
                                 continue;
                         case WAIT_CO:
                                 runner_waiting_co(trg, i);
+                                break;
+                        case WAIT_MUX:
+                                runner_waiting_mux(trg, i);
+                                break;
                 }
                 i++;
         }
@@ -120,22 +127,40 @@ static void runner_handle_wait(void)
 
 static void runner_waiting_co(road_t *waiting, uint64_t wait_pos)
 {
-        if (!waiting || waiting->state != ROAD_WAIT ||
-            waiting->wait.tag != WAIT_CO)
+        if (waiting->wait.tag != WAIT_CO)
                 return;
         road_t *trg = road_from_id(waiting->wait.val.id);
         if (!trg) {
+                /* update road state */
                 waiting->wait.val.res = ROAD_ERROR;
                 waiting->state = ROAD_READY;
+                /* from wait to ready */
                 road_vec_del(runner.wait, wait_pos, NULL);
                 road_list_push_back(runner.ready, waiting);
         } else if (trg->state == ROAD_SUCCESS || trg->state == ROAD_FAIL) {
+                /* update awaited */
                 trg->waitcount--;
+                /* update road state */
                 waiting->wait.val.res = trg->result;
                 waiting->state = ROAD_READY;
+                /* from wait to ready */
                 road_vec_del(runner.wait, wait_pos, NULL);
                 road_list_push_back(runner.ready, waiting);
         }
+}
+
+static void runner_waiting_mux(road_t *waiting, uint64_t wait_pos)
+{
+        if (waiting->wait.tag != WAIT_MUX)
+                return;
+        if (mutex_lock(waiting->wait.val.mux))
+                return;
+        /* update road state */
+        waiting->state = ROAD_READY;
+        waiting->wait.tag = WAIT_NONE;
+        /* from wait to ready */
+        road_vec_del(runner.wait, wait_pos, NULL);
+        road_list_push_back(runner.ready, waiting);
 }
 
 static inline road_t *road_from_id(road_id id)

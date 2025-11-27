@@ -5,7 +5,9 @@
 #include "libco.h"
 #include "roadrunner.h"
 
+#include "mutex.h"
 #include "util.h"
+#include <threads.h>
 
 typedef enum road_state_t {
         ROAD_READY,
@@ -17,11 +19,13 @@ typedef enum road_state_t {
 typedef enum road_wait_tag {
         WAIT_NONE,
         WAIT_CO,
+        WAIT_MUX,
 } road_wait_tag;
 
 typedef union road_wait_kind {
         void *res;
         road_id id;
+        mutex_t *mux;
 } road_wait_kind;
 
 typedef struct road_wait_t {
@@ -53,6 +57,9 @@ typedef struct runner_t {
         road_vec *wait;
         road_vec *end;
 } runner_t;
+
+extern thread_local runner_t runner;
+extern thread_local cothread_t runner_co;
 
 /* @brief internal road new */
 road_t *road_request();

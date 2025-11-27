@@ -12,7 +12,7 @@ TEST_d=test/
 DIRS=$(LIB_d) $(OBJ_d) $(BIN_d)
 LIB_name=road
 
-SRCs=$(SRC_d)runner.c
+SRCs=$(wildcard $(SRC_d)*.c)
 OBJs=$(patsubst $(SRC_d)%.c, $(OBJ_d)%.o, $(SRCs))
 LIB=$(LIB_d)lib$(LIB_name).so
 
