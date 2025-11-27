@@ -265,7 +265,6 @@ void road_yield(void)
         road_t *curr;
         road_list_pop_front(runner.ready, &curr);
         road_list_push_back(runner.ready, curr);
-        printf("> yield\n");
         co_switch(runner_co);
 }
 

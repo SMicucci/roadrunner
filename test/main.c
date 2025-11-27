@@ -40,9 +40,9 @@ int main(void)
         road_id wait = road_create(await_road, rec);
         road_join(wait);
         free(rec);
-        log_road(0, "main road end");
         road_yield();
         /* test mutex await */
+        log_road(0, "main road create mutex roads");
         road_id mux_roads[NUM];
         for (int i = 0; i < NUM; i++) {
                 struct road_mux_arg *arg = malloc(sizeof(*arg));
@@ -50,9 +50,11 @@ int main(void)
                 arg->id = mux_roads[i];
                 arg->mux = &mux;
         }
+        log_road(0, "main road join mutex roads");
         for (int i = 0; i < NUM; i++) {
                 road_join(mux_roads[i]);
         }
+        log_road(0, "main road end");
         return 0;
 }
 
@@ -69,7 +71,7 @@ void *my_road(void *arg)
 void *await_road(void *arg)
 {
         int i = *(int *)arg;
-        printf(" > recursive => [%d]\n", i);
+        // printf("   - recursive => [%d]\n", i);
         if (i-- == 0) {
                 log_road((road_id)-1, "recursive road base case");
                 return NULL;
